@@ -2,9 +2,10 @@ import gym
 import argparse
 import numpy as np
 import atari_py
-from game_models.ddqn_game_model import DDQNTrainer, DDQNSolver
+from game_models.ddqn_game_model import DDQNSolver, DDQNSolver_torch, DDQNTrainer_torch
 from game_models.ge_game_model import GETrainer, GESolver
 from gym_wrappers import MainGymWrapper
+import time 
 
 FRAMES_IN_OBSERVATION = 4
 FRAME_SIZE = 84
@@ -15,7 +16,12 @@ class Atari:
 
     def __init__(self):
         game_name, game_mode, render, total_step_limit, total_run_limit, clip = self._args()
-        env_name = game_name + "Deterministic-v4"  # Handles frame skipping (4) at every iteration
+
+        if "CartPole" not in game_name:
+            env_name = game_name + "Deterministic-v4"  # Handles frame skipping (4) at every iteration
+        else:
+            env_name = game_name
+        
         env = MainGymWrapper.wrap(gym.make(env_name))
         self._main_loop(self._game_model(game_mode, game_name, env.action_space.n), env, render, total_step_limit, total_run_limit, clip)
 
@@ -25,9 +31,11 @@ class Atari:
 
         run = 0
         total_step = 0
+        start_time = time.time()
         while True:
+            run_start_time = time.time()
             if total_run_limit is not None and run >= total_run_limit:
-                print "Reached total run limit of: " + str(total_run_limit)
+                print ("Reached total run limit of: " + str(total_run_limit))
                 exit(0)
 
             run += 1
@@ -36,7 +44,7 @@ class Atari:
             score = 0
             while True:
                 if total_step >= total_step_limit:
-                    print "Reached total step limit of: " + str(total_step_limit)
+                    print ("Reached total step limit of: " + str(total_step_limit))
                     exit(0)
                 total_step += 1
                 step += 1
@@ -52,11 +60,16 @@ class Atari:
                 game_model.remember(current_state, action, reward, next_state, terminal)
                 current_state = next_state
 
-                game_model.step_update(total_step)
+                game_model.step_update(total_step, run)
 
                 if terminal:
+                    print("Run: {}".format(run))
                     game_model.save_run(score, step, run)
                     break
+            run_end_time = time.time()
+            if isinstance(game_model, DDQNTrainer_torch):
+                print("----Time Used: {:.2f} m-----Run Time: {:.2f} m----Estimated Time Left: {:.2f} m".format((run_end_time-start_time)/60
+                                                                , (run_end_time-run_start_time)/60, (run_end_time-start_time)*total_run_limit/(60*run)-(run_end_time-start_time)/60))
 
     def _args(self):
         parser = argparse.ArgumentParser()
@@ -74,25 +87,27 @@ class Atari:
         total_step_limit = args.total_step_limit
         total_run_limit = args.total_run_limit
         clip = args.clip
-        print "Selected game: " + str(game_name)
-        print "Selected mode: " + str(game_mode)
-        print "Should render: " + str(render)
-        print "Should clip: " + str(clip)
-        print "Total step limit: " + str(total_step_limit)
-        print "Total run limit: " + str(total_run_limit)
+        print ("Selected game: " + str(game_name))
+        print ("Selected mode: " + str(game_mode))
+        print ("Should render: " + str(render))
+        print ("Should clip: " + str(clip))
+        print ("Total step limit: " + str(total_step_limit))
+        print ("Total run limit: " + str(total_run_limit))
         return game_name, game_mode, render, total_step_limit, total_run_limit, clip
 
     def _game_model(self, game_mode,game_name, action_space):
         if game_mode == "ddqn_training":
-            return DDQNTrainer(game_name, INPUT_SHAPE, action_space)
+            # return DDQNTrainer(game_name, INPUT_SHAPE, action_space)
+            return DDQNTrainer_torch(game_name, INPUT_SHAPE, action_space)
         elif game_mode == "ddqn_testing":
-            return DDQNSolver(game_name, INPUT_SHAPE, action_space)
+            # return DDQNSolver(game_name, INPUT_SHAPE, action_space)
+            return DDQNSolver_torch(game_name, INPUT_SHAPE, action_space)
         elif game_mode == "ge_training":
             return GETrainer(game_name, INPUT_SHAPE, action_space)
         elif game_mode == "ge_testing":
             return GESolver(game_name, INPUT_SHAPE, action_space)
         else:
-            print "Unrecognized mode. Use --help"
+            print ("Unrecognized mode. Use --help")
             exit(1)
 
 

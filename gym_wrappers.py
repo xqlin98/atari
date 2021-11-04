@@ -185,9 +185,10 @@ class MainGymWrapper():
 
     @staticmethod
     def wrap(env):
-        env = NoopResetEnv(env, noop_max=30)
-        if 'FIRE' in env.unwrapped.get_action_meanings():
-            env = FireResetEnv(env)
+        if "CartPole" not in env.spec.id:
+            env = NoopResetEnv(env, noop_max=30)
+            if 'FIRE' in env.unwrapped.get_action_meanings():
+                env = FireResetEnv(env)
         env = ProcessFrame84(env)
         env = ChannelsFirstImageShape(env)
         env = FrameStack(env, 4)

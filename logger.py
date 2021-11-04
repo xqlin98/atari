@@ -8,7 +8,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 TRAINING_UPDATE_FREQUENCY = 1000
-RUN_UPDATE_FREQUENCY = 10
+# RUN_UPDATE_FREQUENCY = 10
+RUN_UPDATE_FREQUENCY = 3
 MAX_LOSS = 5
 
 
@@ -61,8 +62,8 @@ class Stat:
         self.values.append(value)
         if len(self.values) % self.update_frequency == 0:
             mean_value = mean(self.values)
-            print self.y_label + ": (min: " + str(min(self.values)) + ", avg: " + str(mean_value) + ", max: " + str(max(self.values))
-            print '{"metric": "' + self.y_label + '", "value": {}}}'.format(mean_value)
+            print (self.y_label + ": (min: " + str(min(self.values)) + ", avg: " + str(mean_value) + ", max: " + str(max(self.values)))
+            print ('{"metric": "' + self.y_label + '", "value": {}}}'.format(mean_value))
             self._save_csv(self.directory_path + self.y_label + ".csv", mean_value)
             self._save_png(input_path=self.directory_path + self.y_label + ".csv",
                            output_path=self.directory_path + self.y_label + ".png",
@@ -90,7 +91,7 @@ class Stat:
         temp_values_in_batch = []
         relative_batch_length = big_batch_length/small_batch_length
 
-        for i in xrange(len(y)):
+        for i in range(len(y)):
             temp_values_in_batch.append(y[i])
             if (i+1) % relative_batch_length == 0:
                 if not batch_averages_y:
