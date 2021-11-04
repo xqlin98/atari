@@ -19,23 +19,22 @@ from collections import namedtuple, deque
 
 
 GAMMA = 0.99
-MEMORY_SIZE = 20000
+MEMORY_SIZE = 900000
 # BATCH_SIZE = 128
 BATCH_SIZE = 128
 TRAINING_FREQUENCY = 4
-# TARGET_NETWORK_UPDATE_FREQUENCY = 40000
-TARGET_NETWORK_UPDATE_FREQUENCY = 10
+TARGET_NETWORK_UPDATE_FREQUENCY = 40000
 # MODEL_PERSISTENCE_UPDATE_FREQUENCY = 10000
 MODEL_PERSISTENCE_UPDATE_FREQUENCY = 5000
 # REPLAY_START_SIZE = 50000
-REPLAY_START_SIZE = 500
+REPLAY_START_SIZE = 5000
 
 # EXPLORATION_MAX = 1.0
-EXPLORATION_MAX = 0.9
+EXPLORATION_MAX = 0.95
 EXPLORATION_MIN = 0.1
 EXPLORATION_TEST = 0.02
 # EXPLORATION_STEPS = 850000
-EXPLORATION_STEPS = 50000
+EXPLORATION_STEPS = 850000
 EXPLORATION_DECAY = (EXPLORATION_MAX-EXPLORATION_MIN)/EXPLORATION_STEPS
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -230,7 +229,7 @@ class DDQNSolver(DDQNGameModel):
 #         self.ddqn_target.set_weights(self.ddqn.get_weights())
 
 
-class DQN(nn.Module):
+class DQNbn(nn.Module):
 
     def __init__(self, c, h, w, outputs):
         super(DQN, self).__init__()
@@ -257,6 +256,35 @@ class DQN(nn.Module):
         x = F.relu(self.bn1(self.conv1(x)))
         x = F.relu(self.bn2(self.conv2(x)))
         x = F.relu(self.bn3(self.conv3(x)))
+        return self.head(x.view(x.size(0), -1))
+
+class DQN(nn.Module):
+
+    def __init__(self, c, h, w, outputs):
+        super(DQN, self).__init__()
+        self.conv1 = nn.Conv2d(c, 16, kernel_size=5, stride=2)
+        # self.bn1 = nn.BatchNorm2d(16)
+        self.conv2 = nn.Conv2d(16, 32, kernel_size=5, stride=2)
+        # self.bn2 = nn.BatchNorm2d(32)
+        self.conv3 = nn.Conv2d(32, 32, kernel_size=5, stride=2)
+        # self.bn3 = nn.BatchNorm2d(32)
+
+        # Number of Linear input connections depends on output of conv2d layers
+        # and therefore the input image size, so compute it.
+        def conv2d_size_out(size, kernel_size = 5, stride = 2):
+            return (size - (kernel_size - 1) - 1) // stride  + 1
+        convw = conv2d_size_out(conv2d_size_out(conv2d_size_out(w)))
+        convh = conv2d_size_out(conv2d_size_out(conv2d_size_out(h)))
+        linear_input_size = convw * convh * 32
+        self.head = nn.Linear(linear_input_size, outputs)
+
+    # Called with either one element to determine next action, or a batch
+    # during optimization. Returns tensor([[left0exp,right0exp]...]).
+    def forward(self, x):
+        x = x.to(device) / 255
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
         return self.head(x.view(x.size(0), -1))
 
 Transition = namedtuple('Transition',
@@ -294,7 +322,8 @@ class DDQNTrainer_torch(DDQNGameModel):
         os.makedirs(os.path.dirname(self.model_path))
 
         self.ddqn = DQN(*input_shape, action_space).to(device)
-        self.optimizer = optim.RMSprop(self.ddqn.parameters())
+        self.optimizer = optim.RMSprop(self.ddqn.parameters(),lr=0.00025, alpha=0.95, eps=0.01)
+        # self.optimizer = optim.Adam(self.ddqn.parameters(), lr=0.00025)
         self.ddqn_target = DQN(*input_shape, action_space).to(device)
         self._reset_target_network()
         self.epsilon = EXPLORATION_MAX
@@ -310,11 +339,11 @@ class DDQNTrainer_torch(DDQNGameModel):
         return np.argmax(q_values[0].detach().cpu().numpy())
 
     def remember(self, current_state, action, reward, next_state, terminal):
-        self.memory.push(torch.unsqueeze(torch.tensor(np.asarray(current_state), dtype=torch.float32, device=device),dim=0),
-                            torch.unsqueeze(torch.tensor(np.asarray(action), dtype=torch.int64, device=device),dim=0),
-                            torch.tensor(np.asarray(reward), dtype=torch.float32, device=device),
-                            torch.unsqueeze(torch.tensor(np.asarray(next_state), dtype=torch.float32, device=device),dim=0),
-                            torch.tensor(terminal != True, dtype=torch.bool, device=device))
+        self.memory.push(torch.unsqueeze(torch.tensor(np.asarray(current_state), dtype=torch.float32),dim=0),
+                            torch.unsqueeze(torch.tensor(np.asarray(action), dtype=torch.int64),dim=0),
+                            torch.tensor(np.asarray(reward), dtype=torch.float32),
+                            torch.unsqueeze(torch.tensor(np.asarray(next_state), dtype=torch.float32),dim=0),
+                            torch.tensor(terminal != True, dtype=torch.bool))
         if len(self.memory) > MEMORY_SIZE:
             self.memory.pop(0)
 
@@ -333,8 +362,7 @@ class DDQNTrainer_torch(DDQNGameModel):
         if total_step % MODEL_PERSISTENCE_UPDATE_FREQUENCY == 0:
             self._save_model()
 
-        if run % TARGET_NETWORK_UPDATE_FREQUENCY == 0 and run != self.pre_run:
-            self.pre_run = run
+        if total_step % TARGET_NETWORK_UPDATE_FREQUENCY == 0:
             self._reset_target_network()
             print('{{"metric": "epsilon", "value": {}}}'.format(self.epsilon))
             print('{{"metric": "total_step", "value": {}}}'.format(total_step))
@@ -361,10 +389,10 @@ class DDQNTrainer_torch(DDQNGameModel):
         non_final_mask = torch.tensor(batch.terminal, device=device)
 
         non_final_next_states = torch.cat([s for s,t in zip(batch.next_state,batch.terminal)
-                                                if t])
+                                                if t]).to(device)
 
-        state_batch = torch.cat(batch.current_state)
-        action_batch = torch.unsqueeze(torch.cat(batch.action),dim=1)
+        state_batch = torch.cat(batch.current_state).to(device)
+        action_batch = torch.unsqueeze(torch.cat(batch.action),dim=1).to(device)
         reward_batch = torch.tensor(batch.reward, device=device)
         state_action_values = self.ddqn(state_batch).gather(1, action_batch)
 
@@ -384,7 +412,7 @@ class DDQNTrainer_torch(DDQNGameModel):
             param.grad.data.clamp_(-1, 1)
         self.optimizer.step()
 
-        return 0, 0, 0
+        return float(loss.detach().cpu().numpy()), 0, float(torch.mean(next_state_values).detach().cpu().numpy())
 
     def _update_epsilon(self):
         self.epsilon -= EXPLORATION_DECAY
